@@ -1,0 +1,20 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Editor/IDE
+.idea/
+.vscode/
