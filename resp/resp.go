@@ -248,6 +248,25 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		DB_STORE.Set(list_name, list)
 		var reply = RespValue{Type: Integer, Int: int64(len(list.Arr))}
 		return Serialize(&reply), nil
+	case "lpush":
+		if len(arguments) < 2 {
+			return "", fmt.Errorf("lpush expects at least 2 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var new_list = RespValue{Type: Array, Arr: make([]RespValue, len(arguments)-1)}
+		for i, j := len(arguments)-1, 0; i > 0; i, j = i-1, j+1 {
+			new_list.Arr[j] = arguments[i]
+		}
+
+		var old_list, old_list_exists = DB_STORE.Get(list_name)
+		if old_list_exists {
+			new_list.Arr = append(new_list.Arr, old_list.Arr...)
+		}
+
+		DB_STORE.Set(list_name, &new_list)
+		var reply = RespValue{Type: Integer, Int: int64(len(new_list.Arr))}
+		return Serialize(&reply), nil
 	case "lrange":
 		if len(arguments) < 3 {
 			return "", fmt.Errorf("rpush expects at least 3 arguments but got :%d", len(arguments))
