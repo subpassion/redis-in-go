@@ -304,6 +304,48 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 
 		var list_range = RespValue{Type: Array, Arr: list.Arr[from:min(to+1, list_len)]}
 		return Serialize(&list_range), nil
+	case "llen":
+		if len(arguments) < 1 {
+			return "", fmt.Errorf("llen expects at least 1 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var reply = RespValue{Type: Integer, Int: 0}
+		if list, exits := DB_STORE.Get(list_name); exits {
+			reply.Int = int64(len(list.Arr))
+		}
+
+		return Serialize(&reply), nil
+	case "lpop":
+		if len(arguments) < 1 {
+			return "", fmt.Errorf("lpop expects at least 1 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var list, exits = DB_STORE.Get(list_name)
+		if !exits || len(list.Arr) == 0 {
+			return Serialize(&RespValue{Type: BulkNullString}), nil
+		}
+
+		var n_elem_to_remove = 1
+		if len(arguments) == 2 {
+			from_cmd_n_elem_to_remove, err := strconv.Atoi(arguments[1].Str)
+			if err != nil {
+				return "", err
+			}
+
+			n_elem_to_remove = from_cmd_n_elem_to_remove
+		}
+
+		var removed = list.Arr[0:n_elem_to_remove]
+		list.Arr = list.Arr[n_elem_to_remove:]
+		DB_STORE.Set(list_name, list)
+
+		if len(removed) > 1 {
+			return Serialize(&RespValue{Type: Array, Arr: removed}), nil
+		} else {
+			return Serialize(&RespValue{Type: BulkString, Str: removed[0].Str}), nil
+		}
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
