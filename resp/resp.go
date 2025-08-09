@@ -231,6 +231,60 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		return Serialize(&RespValue{Type: SimpleString, Str: "OK"}), nil
+	case "rpush":
+		if len(arguments) < 2 {
+			return "", fmt.Errorf("rpush expects at least 2 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var list, list_exits = DB_STORE.Get(list_name)
+		var list_elements = arguments[1:]
+		if list_exits {
+			list.Arr = append(list.Arr, list_elements...)
+		} else {
+			list = &RespValue{Type: Array, Arr: list_elements}
+		}
+
+		DB_STORE.Set(list_name, list)
+		var reply = RespValue{Type: Integer, Int: int64(len(list.Arr))}
+		return Serialize(&reply), nil
+	case "lrange":
+		if len(arguments) < 3 {
+			return "", fmt.Errorf("rpush expects at least 3 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var list, list_exits = DB_STORE.Get(list_name)
+		var empty_list = RespValue{Type: Array, Arr: []RespValue{}}
+		if !list_exits {
+			return Serialize(&empty_list), nil
+		}
+
+		var list_len = int64(len(list.Arr))
+		var from, from_err = strconv.ParseInt(arguments[1].Str, 10, 64)
+		if from_err != nil {
+			return "", fmt.Errorf("failed to parse start index")
+		}
+
+		if from < 0 {
+			from = max(0, list_len+from)
+		}
+
+		var to, to_err = strconv.ParseInt(arguments[2].Str, 10, 64)
+		if to_err != nil {
+			return "", fmt.Errorf("failed to parse end index")
+		}
+
+		if to < 0 {
+			to = max(0, list_len+to)
+		}
+
+		if from > to || from >= list_len {
+			return Serialize(&empty_list), nil
+		}
+
+		var list_range = RespValue{Type: Array, Arr: list.Arr[from:min(to+1, list_len)]}
+		return Serialize(&list_range), nil
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
