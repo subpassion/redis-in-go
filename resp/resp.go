@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -31,7 +30,7 @@ const (
 	CRLF = "\r\n"
 )
 
-var DB_STORE sync.Map // string:*RespValue
+var DB_STORE DataStore
 
 func FindCRLF(resp_data string, when string) (int, int, error) {
 	var res = strings.Index(resp_data, CRLF)
@@ -197,16 +196,12 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			return "", fmt.Errorf("get expects one argument but got 0")
 		}
 
-		var value_obj, value_exists = DB_STORE.Load(arguments[0].Str)
+		var resp_value, value_exists = DB_STORE.Get(arguments[0].Str)
 		if !value_exists {
 			return Serialize(&RespValue{Type: BulkNullString}), nil
 		}
 
-		if resp_value, ok := value_obj.(*RespValue); !ok {
-			return "", fmt.Errorf("failed to convert to Resp Value")
-		} else {
-			return Serialize(resp_value), nil
-		}
+		return Serialize(resp_value), nil
 	case "set":
 		if len(arguments) < 2 {
 			return "", fmt.Errorf("set expects at least 2 arguments but got :%d", len(arguments))
@@ -216,7 +211,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		var value = arguments[1]
 		// TODO: check if the key already exits
 		log.Printf("Set %s to %s", strconv.Quote(key), strconv.Quote(value.Str))
-		DB_STORE.Store(key, &value)
+		DB_STORE.Set(key, &value)
 
 		// TODO: create a normal command parser
 		var px_idx = get_value_index_with_key(arguments, "px")
