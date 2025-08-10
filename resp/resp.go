@@ -245,6 +245,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		DB_STORE.Set(list_name, list)
+		DB_STORE.NotifyListUpdated(list_name)
 		var reply = RespValue{Type: Integer, Int: int64(len(list.Arr))}
 		return Serialize(&reply), nil
 	case "lpush":
@@ -264,6 +265,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		DB_STORE.Set(list_name, &new_list)
+		DB_STORE.NotifyListUpdated(list_name)
 		var reply = RespValue{Type: Integer, Int: int64(len(new_list.Arr))}
 		return Serialize(&reply), nil
 	case "lrange":
@@ -345,6 +347,31 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		} else {
 			return Serialize(&RespValue{Type: BulkString, Str: removed[0].Str}), nil
 		}
+	case "blpop":
+		if len(arguments) < 2 {
+			return "", fmt.Errorf("blpop expects at least 2 arguments but got :%d", len(arguments))
+		}
+
+		var list_name = arguments[0].Str
+		var timeout, tm_err = strconv.ParseFloat(arguments[1].Str, 64)
+		if tm_err != nil {
+			return "", fmt.Errorf("failed to parse timeout argument: %s", tm_err.Error())
+		}
+
+		var list, exits = DB_STORE.Get(list_name)
+		if !exits || len(list.Arr) == 0 {
+			var key, err = DB_STORE.WaitForListToBeUpdate(time.Duration(timeout * float64(time.Second)))
+			if err != nil {
+				return Serialize(&RespValue{Type: BulkNullString}), nil
+			}
+
+			list, _ = DB_STORE.Get(key)
+		}
+
+		var removed = list.Arr[0]
+		list.Arr = list.Arr[1:]
+		DB_STORE.Set(list_name, list)
+		return Serialize(&RespValue{Type: Array, Arr: []RespValue{arguments[0], removed}}), nil
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
