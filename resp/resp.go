@@ -30,7 +30,7 @@ const (
 	CRLF = "\r\n"
 )
 
-var DB_STORE DataStore
+var DB_STORE DataStore = CreatedDataStore()
 
 func FindCRLF(resp_data string, when string) (int, int, error) {
 	var res = strings.Index(resp_data, CRLF)
@@ -90,7 +90,7 @@ func parse(resp_data string) (RespValue, string, error) {
 			return RespValue{}, "", err
 		}
 
-		var bulk_str_length, parse_error = strconv.ParseInt(resp_data[:bulk_string_length_ends], 10, 64)
+		var bulk_str_length, parse_error = strconv.Atoi(resp_data[:bulk_string_length_ends])
 		if parse_error != nil {
 			return RespValue{}, "", parse_error
 		}
@@ -103,7 +103,7 @@ func parse(resp_data string) (RespValue, string, error) {
 			return RespValue{}, "", err
 		}
 
-		n_elements, err := strconv.ParseInt(resp_data[:n_elements_ends], 10, 64)
+		n_elements, err := strconv.Atoi(resp_data[:n_elements_ends])
 		if err != nil {
 			return RespValue{}, "", fmt.Errorf("couldn't determine array size: %s", err.Error())
 		}
@@ -180,7 +180,6 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 
 	var command = strings.ToLower(command_with_args.Arr[0].Str)
 	var arguments = command_with_args.Arr[1:]
-
 	// TODO: handle errors properly
 	switch command {
 	case "ping":
@@ -217,7 +216,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		var px_idx = get_value_index_with_key(arguments, "px")
 		if px_idx != -1 {
 			var px_obj = arguments[px_idx]
-			var px, px_parse_err = strconv.ParseInt(px_obj.Str, 10, 64)
+			var px, px_parse_err = strconv.Atoi(px_obj.Str)
 			if px_parse_err != nil {
 				return "", px_parse_err
 			}
@@ -269,7 +268,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		return Serialize(&reply), nil
 	case "lrange":
 		if len(arguments) < 3 {
-			return "", fmt.Errorf("rpush expects at least 3 arguments but got :%d", len(arguments))
+			return "", fmt.Errorf("lrange expects at least 3 arguments but got :%d", len(arguments))
 		}
 
 		var list_name = arguments[0].Str
@@ -279,8 +278,8 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			return Serialize(&empty_list), nil
 		}
 
-		var list_len = int64(len(list.Arr))
-		var from, from_err = strconv.ParseInt(arguments[1].Str, 10, 64)
+		var list_len = len(list.Arr)
+		var from, from_err = strconv.Atoi(arguments[1].Str)
 		if from_err != nil {
 			return "", fmt.Errorf("failed to parse start index")
 		}
@@ -289,7 +288,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			from = max(0, list_len+from)
 		}
 
-		var to, to_err = strconv.ParseInt(arguments[2].Str, 10, 64)
+		var to, to_err = strconv.Atoi(arguments[2].Str)
 		if to_err != nil {
 			return "", fmt.Errorf("failed to parse end index")
 		}
