@@ -17,13 +17,16 @@ const (
 	BulkNullString
 	Integer
 	Array
+	Stream
+	Err
 )
 
 type RespValue struct {
-	Type RespType
-	Int  int64
-	Str  string
-	Arr  []RespValue
+	Type   RespType
+	Int    int64
+	Str    string
+	Arr    []RespValue
+	Stream StreamStore
 }
 
 const (
@@ -44,6 +47,8 @@ func GetType(value *RespValue) string {
 	switch value.Type {
 	case Array:
 		return "list"
+	case Stream:
+		return "stream"
 	case BulkString, SimpleString, BulkNullString:
 		return "string"
 	default:
@@ -162,6 +167,8 @@ func Serialize(resp_value *RespValue) string {
 		return fmt.Sprintf("$-1%s", CRLF)
 	case Integer:
 		return fmt.Sprintf(":%d%s", resp_value.Int, CRLF)
+	case Err:
+		return fmt.Sprintf("-%s%s", resp_value.Str, CRLF)
 	case Array:
 		var res = ""
 		for _, val := range resp_value.Arr {
@@ -395,6 +402,31 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		return Serialize(&reply), nil
+	case "xadd":
+		if len(arguments) < 2 {
+			return "", fmt.Errorf("xadd expects at least 2 arguments but got :%d", len(arguments))
+		}
+
+		var stream_name = arguments[0].Str
+		var entry_id = arguments[1].Str
+
+		var stream_store, exists = DB_STORE.Get(stream_name)
+		if !exists {
+			stream_store = &RespValue{Type: Stream, Stream: CreateStreamStore()}
+		}
+
+		for entry_idx := 2; entry_idx < len(arguments)-1; entry_idx++ {
+			var entry_key = arguments[entry_idx]
+			var entry_value = arguments[entry_idx+1]
+			if err := stream_store.Stream.AddToStream(entry_id, entry_key.Str, &entry_value); err != nil {
+				// TODO: implement normal error handling for all other errors
+				return Serialize(&RespValue{Type: Err, Str: err.Error()}), nil
+			}
+		}
+
+		DB_STORE.Set(stream_name, &RespValue{Type: Stream, Stream: stream_store.Stream})
+
+		return Serialize(&RespValue{Type: BulkString, Str: entry_id}), nil
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
