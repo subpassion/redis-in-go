@@ -40,6 +40,17 @@ func FindCRLF(resp_data string, when string) (int, int, error) {
 	return res, res + len(CRLF), nil
 }
 
+func GetType(value *RespValue) string {
+	switch value.Type {
+	case Array:
+		return "list"
+	case BulkString, SimpleString, BulkNullString:
+		return "string"
+	default:
+		return "none"
+	}
+}
+
 // find a index of key-pair value stored in array.
 func get_value_index_with_key(resp_array []RespValue, key string) int {
 	idx := slices.IndexFunc(resp_array, func(c RespValue) bool { return c.Type == BulkString && strings.ToLower(c.Str) == key })
@@ -372,6 +383,18 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		list.Arr = list.Arr[1:]
 		DB_STORE.Set(list_name, list)
 		return Serialize(&RespValue{Type: Array, Arr: []RespValue{arguments[0], removed}}), nil
+	case "type":
+		if len(arguments) != 1 {
+			return "", fmt.Errorf("type expects 1 arguments but got: %d", len(arguments))
+		}
+
+		var key = arguments[0].Str
+		var reply = RespValue{Type: SimpleString, Str: "none"}
+		if val, exists := DB_STORE.Get(key); exists {
+			reply.Str = GetType(val)
+		}
+
+		return Serialize(&reply), nil
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
