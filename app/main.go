@@ -50,13 +50,17 @@ func handle(con net.Conn) {
 			continue // TODO: what is the difference between abort and return
 		}
 
-		var command_output, command_err = resp.HandleCommand(&resp_command)
+		var resp_value, command_err = resp.HandleCommand(&resp_command)
 		if command_err != nil {
-			log.Printf("Failed to handle resp command: %s\n", command_err.Error())
+			log.Printf("Failed to handle resp command due to internal error: %s\n", command_err.Error())
 			continue
 		}
 
-		_, err = con.Write([](byte)(command_output))
+		if resp_value.Type == resp.Err {
+			log.Printf("%s\n", resp_value.Str)
+		}
+
+		_, err = con.Write([](byte)(resp.Serialize(&resp_value)))
 		if err != nil {
 			log.Printf("Filed to write PONG response:%s\n", err.Error())
 			continue

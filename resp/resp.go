@@ -180,19 +180,19 @@ func Serialize(resp_value *RespValue) string {
 	}
 }
 
-func HandleCommand(command_with_args *RespValue) (string, error) {
+func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 	if command_with_args.Type != Array {
-		return "", fmt.Errorf("command was not encoded as RespArray")
+		return RespValue{}, fmt.Errorf("command was not encoded as RespArray")
 	}
 
 	if len(command_with_args.Arr) == 0 {
-		return "", fmt.Errorf("got an empty command")
+		return RespValue{}, fmt.Errorf("got an empty command")
 	}
 
 	// TODO: shall we just simply assume that customer will always send the bulk strings?
 	for _, val := range command_with_args.Arr {
 		if type_err := validate_resp_type(&val, BulkString); type_err != nil {
-			return "", type_err
+			return RespValue{}, type_err
 		}
 	}
 
@@ -202,26 +202,26 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 	switch command {
 	case "ping":
 		var pong = RespValue{Str: "PONG", Type: SimpleString}
-		return Serialize(&pong), nil
+		return pong, nil
 	case "echo":
 		if len(arguments) == 0 {
-			return "", fmt.Errorf("echo command expects one argument but got 0")
+			return RespValue{Type: Err, Str: "ERR echo command expects 1 argument but got 0"}, nil
 		}
-		return Serialize(&arguments[0]), nil
+		return arguments[0], nil
 	case "get":
 		if len(arguments) == 0 {
-			return "", fmt.Errorf("get expects one argument but got 0")
+			return RespValue{Type: Err, Str: "ERR get expects one argument but got 1"}, nil
 		}
 
 		var resp_value, value_exists = DB_STORE.Get(arguments[0].Str)
 		if !value_exists {
-			return Serialize(&RespValue{Type: BulkNullString}), nil
+			return RespValue{Type: BulkNullString}, nil
 		}
 
-		return Serialize(resp_value), nil
+		return *resp_value, nil
 	case "set":
 		if len(arguments) < 2 {
-			return "", fmt.Errorf("set expects at least 2 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR set expects at least 2 arguments but got :%d", len(arguments))}, nil
 		}
 
 		var key = arguments[0].Str
@@ -236,7 +236,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			var px_obj = arguments[px_idx]
 			var px, px_parse_err = strconv.Atoi(px_obj.Str)
 			if px_parse_err != nil {
-				return "", px_parse_err
+				return RespValue{}, px_parse_err
 			}
 
 			var value_expired_timer = time.NewTimer(time.Duration(px) * time.Millisecond)
@@ -247,10 +247,10 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			}()
 		}
 
-		return Serialize(&RespValue{Type: SimpleString, Str: "OK"}), nil
+		return RespValue{Type: SimpleString, Str: "OK"}, nil
 	case "rpush":
 		if len(arguments) < 2 {
-			return "", fmt.Errorf("rpush expects at least 2 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR rpush expects at least 2 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
@@ -265,10 +265,10 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		DB_STORE.Set(list_name, list)
 		DB_STORE.NotifyListUpdated(list_name)
 		var reply = RespValue{Type: Integer, Int: int64(len(list.Arr))}
-		return Serialize(&reply), nil
+		return reply, nil
 	case "lpush":
 		if len(arguments) < 2 {
-			return "", fmt.Errorf("lpush expects at least 2 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR lpush expects at least 2 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
@@ -285,23 +285,23 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		DB_STORE.Set(list_name, &new_list)
 		DB_STORE.NotifyListUpdated(list_name)
 		var reply = RespValue{Type: Integer, Int: int64(len(new_list.Arr))}
-		return Serialize(&reply), nil
+		return reply, nil
 	case "lrange":
 		if len(arguments) < 3 {
-			return "", fmt.Errorf("lrange expects at least 3 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR lrange expects at least 3 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
 		var list, list_exits = DB_STORE.Get(list_name)
 		var empty_list = RespValue{Type: Array, Arr: []RespValue{}}
 		if !list_exits {
-			return Serialize(&empty_list), nil
+			return empty_list, nil
 		}
 
 		var list_len = len(list.Arr)
 		var from, from_err = strconv.Atoi(arguments[1].Str)
 		if from_err != nil {
-			return "", fmt.Errorf("failed to parse start index")
+			return RespValue{}, fmt.Errorf("failed to parse start index")
 		}
 
 		if from < 0 {
@@ -310,7 +310,7 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 
 		var to, to_err = strconv.Atoi(arguments[2].Str)
 		if to_err != nil {
-			return "", fmt.Errorf("failed to parse end index")
+			return RespValue{}, fmt.Errorf("failed to parse end index")
 		}
 
 		if to < 0 {
@@ -318,14 +318,14 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		if from > to || from >= list_len {
-			return Serialize(&empty_list), nil
+			return empty_list, nil
 		}
 
 		var list_range = RespValue{Type: Array, Arr: list.Arr[from:min(to+1, list_len)]}
-		return Serialize(&list_range), nil
+		return list_range, nil
 	case "llen":
 		if len(arguments) < 1 {
-			return "", fmt.Errorf("llen expects at least 1 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR llen expects at least 1 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
@@ -334,23 +334,23 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			reply.Int = int64(len(list.Arr))
 		}
 
-		return Serialize(&reply), nil
+		return reply, nil
 	case "lpop":
 		if len(arguments) < 1 {
-			return "", fmt.Errorf("lpop expects at least 1 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR lpop expects at least 1 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
 		var list, exits = DB_STORE.Get(list_name)
 		if !exits || len(list.Arr) == 0 {
-			return Serialize(&RespValue{Type: BulkNullString}), nil
+			return RespValue{Type: BulkNullString}, nil
 		}
 
 		var n_elem_to_remove = 1
 		if len(arguments) == 2 {
 			from_cmd_n_elem_to_remove, err := strconv.Atoi(arguments[1].Str)
 			if err != nil {
-				return "", err
+				return RespValue{}, err
 			}
 
 			n_elem_to_remove = from_cmd_n_elem_to_remove
@@ -361,26 +361,26 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		DB_STORE.Set(list_name, list)
 
 		if len(removed) > 1 {
-			return Serialize(&RespValue{Type: Array, Arr: removed}), nil
+			return RespValue{Type: Array, Arr: removed}, nil
 		} else {
-			return Serialize(&RespValue{Type: BulkString, Str: removed[0].Str}), nil
+			return RespValue{Type: BulkString, Str: removed[0].Str}, nil
 		}
 	case "blpop":
 		if len(arguments) < 2 {
-			return "", fmt.Errorf("blpop expects at least 2 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR blpop expects at least 2 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var list_name = arguments[0].Str
 		var timeout, tm_err = strconv.ParseFloat(arguments[1].Str, 64)
 		if tm_err != nil {
-			return "", fmt.Errorf("failed to parse timeout argument: %s", tm_err.Error())
+			return RespValue{}, fmt.Errorf("failed to parse timeout argument: %s", tm_err.Error())
 		}
 
 		var list, exits = DB_STORE.Get(list_name)
 		if !exits || len(list.Arr) == 0 {
 			var key, err = DB_STORE.WaitForListToBeUpdate(time.Duration(timeout * float64(time.Second)))
 			if err != nil {
-				return Serialize(&RespValue{Type: BulkNullString}), nil
+				return RespValue{Type: BulkNullString}, nil
 			}
 
 			list, _ = DB_STORE.Get(key)
@@ -389,10 +389,10 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		var removed = list.Arr[0]
 		list.Arr = list.Arr[1:]
 		DB_STORE.Set(list_name, list)
-		return Serialize(&RespValue{Type: Array, Arr: []RespValue{arguments[0], removed}}), nil
+		return RespValue{Type: Array, Arr: []RespValue{arguments[0], removed}}, nil
 	case "type":
 		if len(arguments) != 1 {
-			return "", fmt.Errorf("type expects 1 arguments but got: %d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("ERR type expects 1 arguments but got: %d", len(arguments))}, nil
 		}
 
 		var key = arguments[0].Str
@@ -401,10 +401,10 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 			reply.Str = GetType(val)
 		}
 
-		return Serialize(&reply), nil
+		return reply, nil
 	case "xadd":
 		if len(arguments) < 2 {
-			return "", fmt.Errorf("xadd expects at least 2 arguments but got :%d", len(arguments))
+			return RespValue{Type: Err, Str: fmt.Sprintf("xadd expects at least 2 arguments but got :%d", len(arguments))}, nil
 		}
 
 		var stream_name = arguments[0].Str
@@ -417,19 +417,18 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 
 		var processed_stream_id, err = stream_store.Stream.ParseStreamId(stream_id)
 		if err != nil {
-			return Serialize(&RespValue{Type: Err, Str: err.Error()}), nil
+			return RespValue{Type: Err, Str: err.Error()}, nil
 		}
 
 		for entry_idx := 2; entry_idx < len(arguments)-1; entry_idx++ {
 			var entry_key = arguments[entry_idx]
 			var entry_value = arguments[entry_idx+1]
 			stream_store.Stream.AddToStream(processed_stream_id, entry_key.Str, &entry_value)
-
 		}
 
 		DB_STORE.Set(stream_name, &RespValue{Type: Stream, Stream: stream_store.Stream})
-		return Serialize(&RespValue{Type: BulkString, Str: processed_stream_id}), nil
+		return RespValue{Type: BulkString, Str: processed_stream_id}, nil
 	default:
-		return "", fmt.Errorf("unknown command: %s", command)
+		return RespValue{Type: Err, Str: fmt.Sprintf("ERR unknown command: %s", command)}, nil
 	}
 }
