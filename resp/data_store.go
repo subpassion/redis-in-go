@@ -63,65 +63,91 @@ type StreamEntries struct {
 }
 
 type StreamStore struct {
-	stream  map[string]StreamEntries
-	last_id string
+	stream         map[string]StreamEntries
+	last_stream_id StreamId
 }
 
-func parse_entry_key(entry_key string) (int, int, error) {
-	var parts = strings.Split(entry_key, "-")
+type StreamId struct {
+	ms  int64
+	seq int64
+}
+
+func (stream_id StreamId) IsValid() bool {
+	return stream_id.ms != -1 && stream_id.seq != -1
+}
+
+func (stream_id StreamId) ToString() string {
+	return fmt.Sprintf("%d-%d", stream_id.ms, stream_id.seq)
+}
+
+func parse_stream_id(stream_id string, last_stream_id StreamId) (StreamId, error) {
+	if stream_id == "*" {
+		var ms = time.Now().UnixMilli()
+		var seq = last_stream_id.seq + 1
+		return StreamId{ms: ms, seq: seq}, nil
+	}
+
+	var parts = strings.Split(stream_id, "-")
 	if len(parts) != 2 {
-		return -1, -1, fmt.Errorf("failed to parse the stream id key: %s", strconv.Quote(entry_key))
+		return StreamId{}, fmt.Errorf("failed to parse the stream id key: %s", strconv.Quote(stream_id))
 	}
 
-	var ms_time, ms_err = strconv.Atoi(parts[0])
+	var ms, ms_err = strconv.ParseInt(parts[0], 10, 64)
 	if ms_err != nil {
-		return -1, -1, fmt.Errorf("failed to parse millisecond part in the stream id")
+		return StreamId{}, fmt.Errorf("failed to parse millisecond part in the stream id")
 	}
 
-	var sequence_number, sequence_err = strconv.Atoi(parts[1])
-	if sequence_err != nil {
-		return -1, -1, fmt.Errorf("failed to pares sequence part in the stream id")
+	var seq int64 = 0
+	if parts[1] == "*" {
+		if ms == 0 && !last_stream_id.IsValid() {
+			seq = 1
+		} else if last_stream_id.ms == ms {
+			seq = last_stream_id.seq + 1
+		}
+	} else {
+		var seq_err error
+		seq, seq_err = strconv.ParseInt(parts[1], 10, 64)
+		if seq_err != nil {
+			return StreamId{}, fmt.Errorf("failed to parse sequence part in the stream id")
+		}
 	}
 
-	return ms_time, sequence_number, nil
+	return StreamId{ms: ms, seq: seq}, nil
 }
 
-func (stream_store *StreamStore) AddToStream(stream_id string, entry_key string, entry_value *RespValue) error {
+func (stream_store *StreamStore) ParseStreamId(stream_id string) (string, error) {
+	var current_stream_id, current_entry_err = parse_stream_id(stream_id, stream_store.last_stream_id)
+	if current_entry_err != nil {
+		return "", current_entry_err
+	}
+
+	if len(stream_store.stream) != 0 {
+		if current_stream_id.ms == 0 && current_stream_id.seq == 0 {
+			return "", fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
+		}
+
+		if current_stream_id.ms < stream_store.last_stream_id.ms ||
+			(current_stream_id.ms == stream_store.last_stream_id.ms && current_stream_id.seq <= stream_store.last_stream_id.seq) {
+			return "", fmt.Errorf("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+		}
+	}
+
+	stream_store.last_stream_id = current_stream_id
+
+	return current_stream_id.ToString(), nil
+}
+
+func (stream_store *StreamStore) AddToStream(stream_id string, entry_key string, entry_value *RespValue) {
 	stream_entry, exists := stream_store.stream[stream_id]
 	if !exists {
 		stream_entry = StreamEntries{entries: make(map[string]*RespValue)}
 		stream_store.stream[stream_id] = stream_entry
 	}
 
-	if stream_store.last_id != "" {
-		var last_entry_ms, last_entry_sq, last_entry_err = parse_entry_key(stream_store.last_id)
-		if last_entry_err != nil {
-			return last_entry_err
-		}
-
-		var current_entry_ms, current_entry_sq, current_entry_err = parse_entry_key(stream_id)
-		if current_entry_err != nil {
-			return current_entry_err
-		}
-
-		if current_entry_ms == 0 && current_entry_sq == 0 {
-			return fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
-		}
-
-		if current_entry_ms < last_entry_ms ||
-			(current_entry_ms == last_entry_ms && current_entry_sq <= last_entry_sq) {
-			return fmt.Errorf("ERR The ID specified in XADD is equal or smaller than the target stream top item")
-		}
-	}
-
 	stream_entry.entries[entry_key] = entry_value
-
 	stream_store.stream[stream_id] = stream_entry
-	stream_store.last_id = stream_id
-
-	return nil
 }
 
 func CreateStreamStore() StreamStore {
-	return StreamStore{stream: make(map[string]StreamEntries)}
+	return StreamStore{stream: make(map[string]StreamEntries), last_stream_id: StreamId{ms: -1, seq: -1}}
 }

@@ -408,25 +408,27 @@ func HandleCommand(command_with_args *RespValue) (string, error) {
 		}
 
 		var stream_name = arguments[0].Str
-		var entry_id = arguments[1].Str
+		var stream_id = arguments[1].Str
 
 		var stream_store, exists = DB_STORE.Get(stream_name)
 		if !exists {
 			stream_store = &RespValue{Type: Stream, Stream: CreateStreamStore()}
 		}
 
+		var processed_stream_id, err = stream_store.Stream.ParseStreamId(stream_id)
+		if err != nil {
+			return Serialize(&RespValue{Type: Err, Str: err.Error()}), nil
+		}
+
 		for entry_idx := 2; entry_idx < len(arguments)-1; entry_idx++ {
 			var entry_key = arguments[entry_idx]
 			var entry_value = arguments[entry_idx+1]
-			if err := stream_store.Stream.AddToStream(entry_id, entry_key.Str, &entry_value); err != nil {
-				// TODO: implement normal error handling for all other errors
-				return Serialize(&RespValue{Type: Err, Str: err.Error()}), nil
-			}
+			stream_store.Stream.AddToStream(processed_stream_id, entry_key.Str, &entry_value)
+
 		}
 
 		DB_STORE.Set(stream_name, &RespValue{Type: Stream, Stream: stream_store.Stream})
-
-		return Serialize(&RespValue{Type: BulkString, Str: entry_id}), nil
+		return Serialize(&RespValue{Type: BulkString, Str: processed_stream_id}), nil
 	default:
 		return "", fmt.Errorf("unknown command: %s", command)
 	}
