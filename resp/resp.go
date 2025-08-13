@@ -3,6 +3,7 @@ package resp
 import (
 	"fmt"
 	"log"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -415,19 +416,42 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 			stream_store = &RespValue{Type: Stream, Stream: CreateStreamStore()}
 		}
 
-		var processed_stream_id, err = stream_store.Stream.ParseStreamId(stream_id)
+		var processed_stream_id, err = stream_store.Stream.ParseStreamIdForXadd(stream_id)
 		if err != nil {
 			return RespValue{Type: Err, Str: err.Error()}, nil
 		}
 
-		for entry_idx := 2; entry_idx < len(arguments)-1; entry_idx++ {
+		for entry_idx := 2; entry_idx < len(arguments)-1; entry_idx += 2 {
 			var entry_key = arguments[entry_idx]
 			var entry_value = arguments[entry_idx+1]
 			stream_store.Stream.AddToStream(processed_stream_id, entry_key.Str, &entry_value)
 		}
 
 		DB_STORE.Set(stream_name, &RespValue{Type: Stream, Stream: stream_store.Stream})
-		return RespValue{Type: BulkString, Str: processed_stream_id}, nil
+		return RespValue{Type: BulkString, Str: processed_stream_id.ToString()}, nil
+	case "xrange":
+		if len(arguments) < 3 {
+			return RespValue{Type: Err, Str: fmt.Sprintf("xrange expects at least 3 arguments but got :%d", len(arguments))}, nil
+		}
+
+		var stream, stream_exists = DB_STORE.Get(arguments[0].Str)
+		if !stream_exists {
+			return RespValue{Type: Array, Arr: make([]RespValue, 0)}, nil
+		}
+
+		var stream_id_begin, stream_id_begin_err = stream.Stream.ParseStreamIdForXRange(arguments[1].Str, 0)
+		if stream_id_begin_err != nil {
+			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
+		}
+
+		var stream_id_end, stream_id_end_err = stream.Stream.ParseStreamIdForXRange(arguments[2].Str, math.MaxInt64)
+		if stream_id_end_err != nil {
+			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
+		}
+
+		var result = stream.Stream.GetEntries(stream_id_begin, stream_id_end)
+		return result, nil
+
 	default:
 		return RespValue{Type: Err, Str: fmt.Sprintf("ERR unknown command: %s", command)}, nil
 	}

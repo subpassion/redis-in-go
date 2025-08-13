@@ -62,12 +62,14 @@ type StreamEntries struct {
 	entries map[string]*RespValue // TODO: probably other data structure can be used here
 }
 
+// TODO: use different data structure
 type StreamStore struct {
-	stream         map[string]StreamEntries
+	stream         map[StreamId]StreamEntries
 	last_stream_id StreamId
 }
 
 type StreamId struct {
+	// TODO: this should be uint64
 	ms  int64
 	seq int64
 }
@@ -78,6 +80,25 @@ func (stream_id StreamId) IsValid() bool {
 
 func (stream_id StreamId) ToString() string {
 	return fmt.Sprintf("%d-%d", stream_id.ms, stream_id.seq)
+}
+
+func FromString(stream_id string) (StreamId, error) {
+	var parts = strings.Split(stream_id, "-")
+	var ms, ms_err = strconv.ParseInt(parts[0], 10, 64)
+	if ms_err != nil {
+		return StreamId{}, fmt.Errorf("failed to parse millisecond part in the stream id")
+	}
+
+	var seq int64 = -1
+	if len(parts) == 2 {
+		var seq_parsed, seq_err = strconv.ParseInt(parts[1], 10, 64)
+		if seq_err != nil {
+			return StreamId{}, fmt.Errorf("failed to parse sequence part in the stream id")
+		}
+		seq = seq_parsed
+	}
+
+	return StreamId{ms: ms, seq: seq}, nil
 }
 
 func parse_stream_id(stream_id string, last_stream_id StreamId) (StreamId, error) {
@@ -115,39 +136,73 @@ func parse_stream_id(stream_id string, last_stream_id StreamId) (StreamId, error
 	return StreamId{ms: ms, seq: seq}, nil
 }
 
-func (stream_store *StreamStore) ParseStreamId(stream_id string) (string, error) {
+func (stream_store *StreamStore) ParseStreamIdForXadd(stream_id string) (StreamId, error) {
 	var current_stream_id, current_entry_err = parse_stream_id(stream_id, stream_store.last_stream_id)
 	if current_entry_err != nil {
-		return "", current_entry_err
+		return StreamId{}, current_entry_err
 	}
 
 	if len(stream_store.stream) != 0 {
 		if current_stream_id.ms == 0 && current_stream_id.seq == 0 {
-			return "", fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
+			return StreamId{}, fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
 		}
 
 		if current_stream_id.ms < stream_store.last_stream_id.ms ||
 			(current_stream_id.ms == stream_store.last_stream_id.ms && current_stream_id.seq <= stream_store.last_stream_id.seq) {
-			return "", fmt.Errorf("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+			return StreamId{}, fmt.Errorf("ERR The ID specified in XADD is equal or smaller than the target stream top item")
 		}
 	}
 
 	stream_store.last_stream_id = current_stream_id
-
-	return current_stream_id.ToString(), nil
+	return current_stream_id, nil
 }
 
-func (stream_store *StreamStore) AddToStream(stream_id string, entry_key string, entry_value *RespValue) {
+func (stream_store *StreamStore) ParseStreamIdForXRange(stream_id string, seq_number int64) (StreamId, error) {
+	var stream_id_parts = strings.Split(stream_id, "-")
+	if len(stream_id_parts) == 2 {
+		return FromString(stream_id)
+	}
+
+	if len(stream_id_parts) == 1 {
+		var ms, err = strconv.ParseInt(stream_id, 10, 64)
+		if err != nil {
+			return StreamId{}, fmt.Errorf("ERR failed to parse stream id in xrange: %s", stream_id)
+		}
+		return StreamId{ms: ms, seq: seq_number}, nil
+	}
+	return StreamId{}, fmt.Errorf("ERR invalid stream id: %s", stream_id)
+}
+
+func (stream_store *StreamStore) AddToStream(stream_id StreamId, entry_key string, entry_value *RespValue) {
 	stream_entry, exists := stream_store.stream[stream_id]
 	if !exists {
 		stream_entry = StreamEntries{entries: make(map[string]*RespValue)}
-		stream_store.stream[stream_id] = stream_entry
 	}
 
 	stream_entry.entries[entry_key] = entry_value
 	stream_store.stream[stream_id] = stream_entry
 }
 
+func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_end StreamId) RespValue {
+	var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+	for stream_id, entries := range stream_store.stream {
+		if (stream_id.ms >= stream_id_begin.ms && stream_id.ms <= stream_id_end.ms) &&
+			(stream_id.seq >= stream_id_begin.seq && stream_id.seq <= stream_id_end.seq) {
+			var stream_entry_result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+			stream_entry_result.Arr = append(stream_entry_result.Arr, RespValue{Type: BulkString, Str: stream_id.ToString()})
+
+			var entries_result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+			for entry_key, entry_value := range entries.entries {
+				entries_result.Arr = append(entries_result.Arr, RespValue{Type: BulkString, Str: entry_key}, *entry_value)
+			}
+
+			stream_entry_result.Arr = append(stream_entry_result.Arr, entries_result)
+			result.Arr = append(result.Arr, stream_entry_result)
+		}
+	}
+	return result
+}
+
 func CreateStreamStore() StreamStore {
-	return StreamStore{stream: make(map[string]StreamEntries), last_stream_id: StreamId{ms: -1, seq: -1}}
+	return StreamStore{stream: make(map[StreamId]StreamEntries), last_stream_id: StreamId{ms: -1, seq: -1}}
 }
