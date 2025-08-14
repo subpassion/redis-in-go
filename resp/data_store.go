@@ -161,7 +161,7 @@ func (stream_store *StreamStore) ParseStreamIdForXadd(stream_id string) (StreamI
 	return current_stream_id, nil
 }
 
-func (stream_store *StreamStore) ParseStreamIdForXRange(stream_id string, seq_number uint64) (StreamId, error) {
+func (stream_store *StreamStore) ParseIncompleteStreamId(stream_id string, seq_number uint64) (StreamId, error) {
 	if stream_id == "-" {
 		return StreamId{ms: 0, seq: 1}, nil
 	}
@@ -194,10 +194,10 @@ func (stream_store *StreamStore) AddToStream(stream_id StreamId, entry_key strin
 	stream_store.stream[stream_id] = stream_entry
 }
 
-func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_end StreamId) RespValue {
-	var order_stream_ids = make([]StreamId, len(stream_store.stream))
+func get_sorted_stream_ids(stream *map[StreamId]StreamEntries) []StreamId {
+	var order_stream_ids = make([]StreamId, len(*stream))
 	var i = 0
-	for key := range stream_store.stream {
+	for key := range *stream {
 		order_stream_ids[i] = key
 		i++
 	}
@@ -210,7 +210,11 @@ func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_
 		}
 		return int(a.seq - b.seq)
 	})
+	return order_stream_ids
+}
 
+func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_end StreamId) RespValue {
+	var order_stream_ids = get_sorted_stream_ids(&stream_store.stream)
 	var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
 	for _, stream_id := range order_stream_ids {
 		if (stream_id.ms >= stream_id_begin.ms && stream_id.ms <= stream_id_end.ms) &&
@@ -226,6 +230,29 @@ func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_
 
 			stream_entry_result.Arr = append(stream_entry_result.Arr, entries_result)
 			result.Arr = append(result.Arr, stream_entry_result)
+		}
+	}
+	return result
+}
+
+func (stream_store *StreamStore) GetEntriesXRead(stream_key string, stream_id StreamId) RespValue {
+	var order_stream_ids = get_sorted_stream_ids(&stream_store.stream)
+	var result = RespValue{Type: Array, Arr: []RespValue{RespValue{Type: BulkString, Str: stream_key}}}
+	var entry_arr = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+	for _, stored_stream_id := range order_stream_ids {
+		if stored_stream_id.ms > stream_id.ms || (stored_stream_id.ms == stream_id.ms && stored_stream_id.seq > stream_id.seq) {
+			var stream_entry_result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+			stream_entry_result.Arr = append(stream_entry_result.Arr, RespValue{Type: BulkString, Str: stored_stream_id.ToString()})
+
+			var entries_result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+			var entries = stream_store.stream[stored_stream_id].entries
+			for entry_key, entry_value := range entries {
+				entries_result.Arr = append(entries_result.Arr, RespValue{Type: BulkString, Str: entry_key}, *entry_value)
+			}
+
+			stream_entry_result.Arr = append(stream_entry_result.Arr, entries_result)
+			entry_arr.Arr = append(entry_arr.Arr, stream_entry_result)
+			result.Arr = append(result.Arr, entry_arr)
 		}
 	}
 	return result

@@ -439,19 +439,54 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 			return RespValue{Type: Array, Arr: make([]RespValue, 0)}, nil
 		}
 
-		var stream_id_begin, stream_id_begin_err = stream.Stream.ParseStreamIdForXRange(arguments[1].Str, 0)
+		var stream_id_begin, stream_id_begin_err = stream.Stream.ParseIncompleteStreamId(arguments[1].Str, 0)
 		if stream_id_begin_err != nil {
 			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
 		}
 
-		var stream_id_end, stream_id_end_err = stream.Stream.ParseStreamIdForXRange(arguments[2].Str, math.MaxUint64)
+		var stream_id_end, stream_id_end_err = stream.Stream.ParseIncompleteStreamId(arguments[2].Str, math.MaxUint64)
 		if stream_id_end_err != nil {
 			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
 		}
 
 		var result = stream.Stream.GetEntries(stream_id_begin, stream_id_end)
 		return result, nil
+	case "xread":
+		if len(arguments) < 3 {
+			return RespValue{Type: Err, Str: fmt.Sprintf("xread expects at least 3 arguments but got :%d", len(arguments))}, nil
+		}
 
+		var stream_key_start = slices.IndexFunc(arguments, func(c RespValue) bool { return strings.ToLower(c.Str) == "streams" })
+		if stream_key_start == -1 {
+			return RespValue{Type: Err, Str: "ERR missing required `streams` argument"}, nil
+		} else {
+			stream_key_start += 1
+		}
+
+		var n_stream_keys = (len(arguments) - stream_key_start) / 2
+		var n_stream_ids = (len(arguments) - (stream_key_start + n_stream_keys))
+		if n_stream_keys != n_stream_ids {
+			return RespValue{Type: Err, Str: "ERR number of stream keys don't match number of stream ids"}, nil
+		}
+
+		var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+		for stream_key_idx := stream_key_start; stream_key_idx <= n_stream_keys; stream_key_idx++ {
+			var stream_key = arguments[stream_key_idx].Str
+			var stream, stream_exists = DB_STORE.Get(stream_key)
+			if !stream_exists {
+				return RespValue{Type: Array, Arr: make([]RespValue, 0)}, nil
+			}
+
+			var stream_id_idx = stream_key_start + n_stream_keys
+			var stream_id, stream_id_begin_err = stream.Stream.ParseIncompleteStreamId(arguments[stream_id_idx].Str, 0)
+			if stream_id_begin_err != nil {
+				return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
+			}
+
+			result.Arr = append(result.Arr, stream.Stream.GetEntriesXRead(stream_key, stream_id))
+		}
+
+		return result, nil
 	default:
 		return RespValue{Type: Err, Str: fmt.Sprintf("ERR unknown command: %s", command)}, nil
 	}
