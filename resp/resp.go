@@ -444,7 +444,7 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
 		}
 
-		var stream_id_end, stream_id_end_err = stream.Stream.ParseStreamIdForXRange(arguments[2].Str, math.MaxInt64)
+		var stream_id_end, stream_id_end_err = stream.Stream.ParseStreamIdForXRange(arguments[2].Str, math.MaxUint64)
 		if stream_id_end_err != nil {
 			return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
 		}
