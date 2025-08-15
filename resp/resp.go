@@ -469,24 +469,39 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 			return RespValue{Type: Err, Str: "ERR number of stream keys don't match number of stream ids"}, nil
 		}
 
-		var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
-		for stream_key_idx := stream_key_start; stream_key_idx <= n_stream_keys; stream_key_idx++ {
-			var stream_key = arguments[stream_key_idx].Str
-			var stream, stream_exists = DB_STORE.Get(stream_key)
-			if !stream_exists {
-				return RespValue{Type: Array, Arr: make([]RespValue, 0)}, nil
-			}
+		// todo: very inefficient, but makes the job done
+		var get_entries = func() (RespValue, error) {
+			var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+			for stream_key_idx := stream_key_start; stream_key_idx <= n_stream_keys; stream_key_idx++ {
+				var stream_key = arguments[stream_key_idx].Str
+				var stream, stream_exists = DB_STORE.Get(stream_key)
+				if !stream_exists {
+					return RespValue{Type: Array, Arr: make([]RespValue, 0)}, nil
+				}
 
-			var stream_id_idx = stream_key_start + n_stream_keys
-			var stream_id, stream_id_begin_err = stream.Stream.ParseIncompleteStreamId(arguments[stream_id_idx].Str, 0)
-			if stream_id_begin_err != nil {
-				return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
-			}
+				var stream_id_idx = stream_key_start + n_stream_keys
+				var stream_id, stream_id_begin_err = stream.Stream.ParseIncompleteStreamId(arguments[stream_id_idx].Str, 0)
+				if stream_id_begin_err != nil {
+					return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
+				}
 
-			result.Arr = append(result.Arr, stream.Stream.GetEntriesXRead(stream_key, stream_id))
+				result.Arr = append(result.Arr, stream.Stream.GetEntriesXRead(stream_key, stream_id))
+			}
+			return result, nil
 		}
 
-		return result, nil
+		var result, err = get_entries()
+		var block_idx = get_value_index_with_key(arguments, "block")
+		if block_idx != -1 && len(result.Arr) == 0 {
+			var block_timeout, block_timeout_err = strconv.Atoi(arguments[block_idx].Str)
+			if block_timeout_err != nil {
+				return RespValue{}, block_timeout_err
+			}
+			time.Sleep(time.Duration(block_timeout) * time.Millisecond)
+			result, err = get_entries()
+		}
+
+		return result, err
 	default:
 		return RespValue{Type: Err, Str: fmt.Sprintf("ERR unknown command: %s", command)}, nil
 	}
