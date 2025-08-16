@@ -472,7 +472,7 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 		// todo: very inefficient, but makes the job done
 		var get_entries = func() (RespValue, error) {
 			var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
-			for stream_key_idx := stream_key_start; stream_key_idx <= n_stream_keys; stream_key_idx++ {
+			for stream_key_idx := stream_key_start; stream_key_idx < stream_key_start+n_stream_keys; stream_key_idx++ {
 				var stream_key = arguments[stream_key_idx].Str
 				var stream, stream_exists = DB_STORE.Get(stream_key)
 				if !stream_exists {
@@ -484,8 +484,10 @@ func HandleCommand(command_with_args *RespValue) (RespValue, error) {
 				if stream_id_begin_err != nil {
 					return RespValue{Type: Err, Str: stream_id_begin_err.Error()}, nil
 				}
-
-				result.Arr = append(result.Arr, stream.Stream.GetEntriesXRead(stream_key, stream_id))
+				var stream_entries = stream.Stream.GetEntriesXRead(stream_key, stream_id)
+				if len(stream_entries.Arr) != 0 {
+					result.Arr = append(result.Arr, stream_entries)
+				}
 			}
 			return result, nil
 		}

@@ -237,8 +237,9 @@ func (stream_store *StreamStore) GetEntries(stream_id_begin StreamId, stream_id_
 
 func (stream_store *StreamStore) GetEntriesXRead(stream_key string, stream_id StreamId) RespValue {
 	var order_stream_ids = get_sorted_stream_ids(&stream_store.stream)
-	var result = RespValue{Type: Array, Arr: []RespValue{RespValue{Type: BulkString, Str: stream_key}}}
+	var result_arr = make([]RespValue, 0)
 	var entry_arr = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+
 	for _, stored_stream_id := range order_stream_ids {
 		if stored_stream_id.ms > stream_id.ms || (stored_stream_id.ms == stream_id.ms && stored_stream_id.seq > stream_id.seq) {
 			var stream_entry_result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
@@ -252,9 +253,16 @@ func (stream_store *StreamStore) GetEntriesXRead(stream_key string, stream_id St
 
 			stream_entry_result.Arr = append(stream_entry_result.Arr, entries_result)
 			entry_arr.Arr = append(entry_arr.Arr, stream_entry_result)
-			result.Arr = append(result.Arr, entry_arr)
+			result_arr = append(result_arr, entry_arr)
 		}
 	}
+
+	var result = RespValue{Type: Array, Arr: make([]RespValue, 0)}
+	if len(result_arr) != 0 {
+		result.Arr = append(result.Arr, RespValue{Type: BulkString, Str: stream_key})
+		result.Arr = append(result.Arr, result_arr...)
+	}
+
 	return result
 }
 
